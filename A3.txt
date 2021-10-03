@@ -1,0 +1,341 @@
+#include "mbed.h"
+#include "QEI.h"
+#include "C12832.h"
+
+#define RATE 0.1
+#define wheelradius 0.04 // in m
+#define PI 3.14159265358979323846
+
+DigitalOut Enable(PB_6);
+C12832 lcd(D11, D13, D12, D7, D10);
+QEI wheel1(PB_13,PB_14,NC,256);
+QEI wheel2(PC_9,PB_7,NC,256);
+
+DigitalOut sensor1(PB_4);
+DigitalOut sensor2(PB_5);
+DigitalOut sensor3(PB_3);
+DigitalOut sensor4(PA_10);
+DigitalOut sensor5(PB_8);
+DigitalOut sensor6(PB_9);
+
+AnalogIn out1(PC_0);
+AnalogIn out2(PC_1);
+AnalogIn out3(PC_2);
+AnalogIn out4(PC_3);
+AnalogIn out5(PA_4);
+AnalogIn out6(PB_0);
+
+
+class Bipolar {
+private:
+    DigitalOut Bi;
+public:
+    Bipolar(PinName pin): Bi(pin) {}
+    void tru(void) {Bi = 1 ;}
+};
+
+class On {
+private:
+    DigitalOut pins;
+public:
+    On(PinName pin): pins(pin) {}
+    void tru(void) {pins = 1 ;}
+};
+
+class motors {
+private:
+    PwmOut Motor1;
+    PwmOut Motor2;
+public:
+    motors(PinName l, PinName r) : Motor1(l), Motor2(r) {}
+    void setperiod(){
+        Motor1.period(0.0002f);
+        Motor2.period(0.0002f);
+        }
+    void constant (){
+        Motor1.write(0.95f);
+        Motor2.write(0.95f);
+        }
+    void left () {
+        Motor2.write(0.8f);
+        Motor1.write(0.6f);
+        }
+    void right () {
+        Motor2.write(0.6f);
+        Motor1.write(0.8f);
+        }
+    void stop () {
+        Motor1.write(0.5f);
+        Motor2.write(0.5f);
+        }  
+};
+
+class encoder1 {
+private:
+    float w1,current1,newangle1,oldangle1,dth1,s1,w3,v3;
+    Ticker tttq;
+    int sample1;
+public:
+    encoder1 () {tttq.attach(callback(this,&encoder1::getnumber),0.1),s1=0,w1=0,w3=0,v3=0;}
+    
+    
+    void getnumber (void) {
+        sample1=wheel1.getPulses();
+    }
+    
+    int returnsample1 (void) {
+        return sample1;
+    }
+    
+    void showspeed1 (void) {
+        current1 = (float) sample1;
+        newangle1=((current1/(2*256))*360)*((2*PI)/360);
+        oldangle1 = 0;
+        dth1=newangle1-oldangle1; //angle in rad
+        s1+=dth1*wheelradius;
+        w1=dth1/0.1; //angular speed in motor shaft in rad/s
+        w3=w1*0.053333; //angular speed in wheel shaft in rad/s
+        v3=w3*wheelradius; //linear speed of the wheel
+        wheel1.reset();
+        /*lcd.locate (0,3);
+        lcd.printf("Left wheel:");
+        lcd.locate (0,20);
+        lcd.printf("%.3f",s1); */
+    }
+    
+    float distancel (void) {   
+        return s1;
+    }
+    
+    float speed1 (void) {
+        return v3;   
+    }
+};
+
+class encoder2 {
+private:
+    float w2,current2,newangle2,oldangle2,dth2,s2,w4,v4;
+    Ticker ttt;
+    int sample2;
+public:
+    encoder2 () {ttt.attach(callback(this,&encoder2::getnumber2),0.1),s2=0,w2=0,w4=0,v4=0;}
+    
+    void getnumber2 (void) {
+        sample2=-wheel2.getPulses();
+    }
+    
+    int returnsample2 (void) {
+        return sample2;
+    }
+    
+    void showspeed2 (void) {
+        current2 = (float) sample2;
+        newangle2=((current2/(2*256))*360)*((2*PI)/360);
+        oldangle2 = 0;
+        dth2=newangle2-oldangle2; //angle in rad
+        s2+=dth2*wheelradius;
+        w2=dth2/0.1; //angular speed in motor shaft in rad/s
+        w4=w2*0.053333; //angular speed in wheel shaft in rad/s
+        v4=w4*wheelradius; //linear speed of the wheel
+        wheel2.reset();
+        /*lcd.locate (70,3);
+        lcd.printf("Right wheel:");
+        lcd.locate (70,20);
+        lcd.printf("%.3f",s2); */
+    }
+    
+    float distancer (void) {
+           return s2;
+    }
+    
+    float speed2 (void) {
+           return v4;
+    }
+    
+};
+
+/*class display {
+private:
+    float values, error, controlaction;
+    int ref;
+    float integral;
+    float derivative;
+    float kd;
+    float ki;
+    float kp;
+    float lasterror;
+public:
+    display () {ref=0, integral=0, derivative=0, kd=0, ki=0,kp=1, lasterror=0;}
+    float calculation(){
+        values = (3.2)*out1.read()+(2.1)*out2.read()+1*out3.read()+(-1)*out4.read()+(-2)*out5.read()+(-3)*out6.read();
+        error=ref-values;
+        integral = integral + error;
+        derivative = lasterror - error; //derivative=(lasterror - error)/dt ADD dt
+        controlaction = (kp*error)+(ki*integral)+(kd*derivative);
+        lasterror=error;
+        return controlaction;
+    }
+ 
+    
+
+
+}; 
+*/
+class control : public encoder1,encoder2 {
+private:
+    float values, error, controlaction,difference;
+    int ref;
+    float integral;
+    float derivative;
+    float kd;
+    float ki;
+    float kp;
+    float lasterror;
+    float error2,controlaction2,kp2,kd2,ki2,lasterror2,integral2,derivative2;
+    PwmOut MotorOne,MotorTwo;
+public:
+    control (PinName l, PinName r) : MotorOne(l), MotorTwo(r) {ref=0, integral=0, derivative=0,kd=0,ki=0,kp=0.15,kp2=1,kd2=0,ki2=0,lasterror=0,integral2=0,derivative2=0,lasterror2=0;}
+    
+    void setspeed(){
+        values = (3.2)*out1.read()+(2.1)*out2.read()+1*out3.read()+(-1)*out4.read()+(-2)*out5.read()+(-3)*out6.read();
+        error=ref-values;
+        if (error>0.5 || error<-0.5) {
+            integral = integral + error;
+            derivative = lasterror - error; //derivative=(lasterror - error)/dt ADD dt
+            controlaction = (kp*error)+(ki*integral)+(kd*derivative);
+            lasterror=error;
+            MotorOne.write(0.75f - controlaction);
+            MotorTwo.write(0.75f + controlaction);
+        }
+        else {
+            constantspeed();   
+        }
+        wait(0.001);
+    }
+    
+    void setperiod(){
+        MotorOne.period(0.0002f);
+        MotorTwo.period(0.0002f);
+    }
+    
+    void controlstop(){
+        if ((out1.read()<0.05) && (out2.read()<0.05) && (out3.read()<0.05) && (out4.read()<0.05) && (out5.read()<0.05) && (out6.read()<0.05)){ //values need to be tested
+            MotorOne.write(0.5f);
+            MotorTwo.write(0.5f);
+            wait;
+        }
+    }
+    
+    void constantspeed () {
+        difference = speed1() - speed2();
+        if (difference!=0) {
+            error2 = ref - difference;
+            integral2 = integral2 + error2;
+            derivative2 = lasterror2 - error2;
+            contolaction2 = (kp2*error2)+(ki2*integral2)+(kd2*derivative2);
+            lasterror2 = error2;
+            MotorOne.write(0.85f + controlaction);
+            MotorTwo.write(0.85f - controlaction);
+        }
+        else {
+            MotorOne.write(0.85f);
+            MotorTwo.write(0.85f);     
+        }
+        
+    }
+     
+};  
+
+/*class control : public motors {
+private:
+    float values;
+    float co ;
+    float power1,power2; 
+public:
+    control (PinName l, PinName r) : motors(l,r) {}
+    void calculation(){
+        values = out1.read()+out2.read()+out3.read()+out4.read()+out5.read()+out6.read();
+        controller.setProcessValue(values);
+        co= controller.compute() * 5;  //test this
+        }
+    void powers (){
+        power1=power1+co;
+        power2=power2-co;
+    }
+    
+    float showvalue (void) {
+        values =5*out1.read()+2.5*out2.read()+1.2*out3.read()+(-1.45)*out4.read()+(-2.4)*out5.read()+(-3.7)*out6.read()+0.855+0.29;
+        return values;   
+        
+    }
+    
+    
+    
+    void tomotors (){
+        if (values<(-0.2)){
+            left();
+        }  
+        //else if ((sensor0.read()+sensor1.read()+sensor2.read())<(sensor3.read()+sensor4.read()+sensor5.read())){
+                    //Motor2.write(power1); //left motor
+                    //Motor1.write(power2); }
+        else {  constant();
+        }
+    }
+        
+};*/
+
+/*class Bluetooth : public motors  {
+private:
+    Ticker ok;
+    char c;
+    Serial hm10,hm11;
+public:
+    Bluetooth(PinName pin, PinName pin1) : hm10(pin), hm11(pin1) {ok.attach(callback(this, &Bluetooth::signal), 0.001);}
+    void signal (void) {
+        if(hm10.readable()){
+            c = hm10.getc();
+                if(c == 'A'){
+                    turnaround();}
+                }
+        }
+    void turnaround (void) {
+        Motor2.write(0.5f);
+        Motor1.write(0.5f);
+        wait(1);
+        Motor2.write(0.8f);
+        Motor2.write(0.4f);
+        }
+};
+*/
+
+//display A;
+Bipolar B1(PA_7);
+Bipolar B2(PA_8);
+//motors m(PB_10,PA_6);
+encoder1 leftwheel;
+encoder2 rightwheel;
+control pidsensors(PB_10,PA_6);
+//Bluetooth hm10(PA_11, PA_12);
+
+
+int main(void) {
+    //lcd.cls();
+    //hm10.baud(9600);
+    Enable = 0;
+    B1.tru();
+    B2.tru();
+    sensor1=1;
+    sensor2=1;
+    sensor3=1;
+    sensor4=1;
+    sensor5=1;
+    sensor6=1;
+    pidsensors.setperiod();
+    wait(3);
+    Enable=1;
+    while(1){
+        pidsensors.setspeed();
+        pidsensors.controlstop();
+    }
+    
+}
