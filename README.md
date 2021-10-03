@@ -1,0 +1,2 @@
+# embedded_systems_robot_project
+Building an autonomous robot which followed a white line on a track using reflective sensors and PID controllers using Arduino and C++ Team leader for both hardware and software in a team of 5 students I personally implemented the award-winning algorithm (Track Length Estimation Award) to measure the distance covered by the robot accurately to 3 decimal places using C++
